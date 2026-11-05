@@ -23,6 +23,7 @@ import click
 
 from isabl_cli import __version__
 from isabl_cli import exceptions
+from isabl_cli import plugins
 from isabl_cli.settings import system_settings
 from isabl_cli.utils import send_analytics
 
@@ -65,8 +66,19 @@ for i in system_settings.SYSTEM_COMMANDS:
 for i in system_settings.CUSTOM_COMMANDS:  # pragma: no cover
     main.add_command(i)
 
+for i in plugins.get_commands():
+    if i.name in main.commands:
+        click.secho(f"Skipping plugin command {i.name}, name in use.", err=True, fg="red")
+    else:
+        main.add_command(i)
+
 try:
-    add_apps_groups(system_settings.INSTALLED_APPLICATIONS)
+    add_apps_groups(
+        plugins.get_applications(
+            installed=system_settings.INSTALLED_APPLICATIONS,
+            excluded=system_settings.EXCLUDED_APPLICATIONS,
+        )
+    )
 except ImportError as error:
     click.secho(f"Failed to import applications: {error}", err=True, fg="red")
 

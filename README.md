@@ -132,6 +132,43 @@ isabl login
 isabl --help
 ```
 
+### Plugins
+
+Installed packages can extend Isabl CLI with [pluggy](https://pluggy.readthedocs.io) hooks instead of listing applications, commands and signals in the client settings. Register a module in the `isabl_cli` entry point group and implement the hooks you need:
+
+```python
+# setup.py of your package
+entry_points={"isabl_cli": ["my_apps = my_apps.plugin"]}
+```
+
+```python
+# my_apps/plugin.py
+from isabl_cli.discovery import find_applications
+from isabl_cli.hookspecs import hookimpl
+
+@hookimpl
+def isabl_applications():
+    return find_applications("my_apps.apps", required=("NAME", "VERSION", "ASSEMBLY"))
+```
+
+`find_applications` imports the package and returns the `AbstractApplication` subclasses defined in it, skipping classes with `_PRIVATE = True`.
+
+| Hook | Adds to |
+| --- | --- |
+| `isabl_applications()` | `INSTALLED_APPLICATIONS` |
+| `isabl_commands()` | `CUSTOM_COMMANDS` |
+| `isabl_status_change_signals()` | `ON_STATUS_CHANGE` |
+| `isabl_data_import_signals()` | `ON_DATA_IMPORT` |
+| `isabl_signal_failure(endpoint, instance, signal, error)` | `ON_SIGNAL_FAILURE` |
+
+Plugins are opt-in through the client settings, and the settings keep working alongside them:
+
+| Setting | Default | Description |
+| --- | --- | --- |
+| `LOAD_PLUGINS` | `False` | Load plugins from installed packages. |
+| `DISABLED_PLUGINS` | `[]` | Entry point names of plugins to skip. |
+| `EXCLUDED_APPLICATIONS` | `[]` | Glob patterns on import strings or command names to hide, e.g. `["my_apps.apps.legacy.*", "bwa-mem-0.0.*"]`. |
+
 ## CI/CD Setup
 
 The GitHub Actions workflow requires the following secrets to be configured in the repository settings:
