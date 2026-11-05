@@ -22,6 +22,7 @@ import click
 import requests
 
 from isabl_cli import exceptions
+from isabl_cli import plugins
 from isabl_cli import utils
 from isabl_cli.settings import import_from_string
 from isabl_cli.settings import system_settings
@@ -446,7 +447,8 @@ def patch_instance(endpoint, instance_id, **data):
     )
 
     if run_status_change_signals:
-        signals = system_settings.ON_STATUS_CHANGE + [trigger_analyses_merge]
+        signals = plugins.get_signals("status_change", system_settings.ON_STATUS_CHANGE)
+        signals.append(trigger_analyses_merge)
 
         if system_settings.CREATE_SYMLINKS:
             signals.append(symlink_analysis_to_targets)
@@ -454,7 +456,7 @@ def patch_instance(endpoint, instance_id, **data):
         _run_signals("analyses", instance, signals)
 
     if run_data_import_signals:
-        signals = system_settings.ON_DATA_IMPORT
+        signals = plugins.get_signals("data_import", system_settings.ON_DATA_IMPORT)
 
         if system_settings.CREATE_SYMLINKS:
             signals.append(symlink_experiment_to_projects)
@@ -604,8 +606,10 @@ def patch_analyses_status(analyses, status):
 
     api_request("patch", url="/analyses/bulk_update/", json=data)
 
+    signals = plugins.get_signals("status_change", system_settings.ON_STATUS_CHANGE)
+
     for i in analyses:
-        _run_signals("analyses", i, system_settings.ON_STATUS_CHANGE)
+        _run_signals("analyses", i, signals)
 
     return analyses
 
@@ -772,7 +776,7 @@ def _get_analysis_results(analysis, raise_error=True):
 
 def _run_signals(endpoint, instance, signals, raise_error=False, create_record=True):
     errors = []
-    on_failure = system_settings.ON_SIGNAL_FAILURE or (lambda *_, **__: None)
+    on_failure = plugins.get_signal_failure_handlers(system_settings.ON_SIGNAL_FAILURE)
 
     for signal in signals:
         try:
@@ -781,11 +785,12 @@ def _run_signals(endpoint, instance, signals, raise_error=False, create_record=T
             failure_traceback = traceback.format_exc()
             errors.append((error, failure_traceback))
 
-            try:
-                on_failure(endpoint, instance, signal, error)
-            except Exception as on_failure_error:  # pylint: disable=W0703
-                errors.append((on_failure_error, traceback.format_exc()))
-                failure_traceback += traceback.format_exc()
+            for handler in on_failure:
+                try:
+                    handler(endpoint, instance, signal, error)
+                except Exception as on_failure_error:  # pylint: disable=W0703
+                    errors.append((on_failure_error, traceback.format_exc()))
+                    failure_traceback += traceback.format_exc()
 
             if not create_record:
                 continue
