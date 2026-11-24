@@ -478,3 +478,163 @@ def reject_analysis(key, reason):
     analysis = api.get_instance("analyses", key)
     api.patch_analysis_status(analysis, "REJECTED")
     api.patch_instance("analyses", key, notes=reason)
+
+
+_STATUS_COLORS = {
+    "registered": "green",
+    "shared": "green",
+    "changed": "yellow",
+    "not registered": "red",
+    "conflict": "red",
+    "invalid": "red",
+    "not installed": "blue",
+}
+
+
+def _echo_registration_rows(rows):
+    """Print registration rows as aligned columns, details on following lines."""
+    cols = ["STATUS", "ASSEMBLY", "COMMAND", "CLASS"]
+    table = [cols] + [
+        [i.status, i.assembly, i.command_name, i.import_string] for i in rows
+    ]
+    widths = [max(len(str(row[j])) for row in table) for j in range(len(cols))]
+
+    def _line(values, status=None):
+        cells = [str(v).ljust(w) for v, w in zip(values, widths)]
+        if status:
+            cells[0] = click.style(cells[0], fg=_STATUS_COLORS.get(status))
+        return "  ".join(cells).rstrip()
+
+    click.echo(_line(cols))
+
+    for row, values in zip(rows, table[1:]):
+        click.echo(_line(values, row.status))
+        for detail in row.details:
+            click.echo(" " * (widths[0] + 2) + f"- {detail}")
+
+
+@click.command(name="list-apps")
+@click.option(
+    "--status",
+    "statuses",
+    multiple=True,
+    type=click.Choice(
+        [
+            "registered",
+            "changed",
+            "not registered",
+            "shared",
+            "conflict",
+            "invalid",
+            "not installed",
+        ]
+    ),
+    help="Only list applications with this status, can be repeated.",
+)
+@click.option(
+    "--all",
+    "show_all",
+    is_flag=True,
+    help="Also list registered applications that are not installed here.",
+)
+def list_apps(statuses, show_all):
+    """
+    List installed applications and whether they are registered.
+
+    \b
+    registered      the database matches the installed class
+    shared          not the primary class, uses the application of its primary class
+    changed         the database differs from the installed class, see details
+    not registered  no application in the database, see `isabl register-apps`
+    conflict        more than one installed primary class for the same application
+    invalid         the class failed to import or instantiate
+    not installed   in the database but not installed here (with --all)
+    """
+    from isabl_cli import registration  # pylint: disable=C0415
+
+    rows = registration.get_rows(
+        registration.get_installed_applications(),
+        registration.get_application_records(),
+        show_all=show_all or "not installed" in statuses,
+    )
+
+    if statuses:
+        rows = [i for i in rows if i.status in statuses]
+
+    _echo_registration_rows(rows)
+
+
+@click.command(name="register-apps")
+@click.argument("identifiers", nargs=-1)
+@click.option(
+    "--commit",
+    is_flag=True,
+    help="Register the applications, without it only shows what would be done.",
+)
+def register_apps(identifiers, commit):
+    """
+    Create or update the database objects of installed applications.
+
+    Running an application never changes its database object, use this command
+    after adding an application or changing its results, description or url.
+
+    IDENTIFIERS are command names, import strings or class names. Without them,
+    every installed application that is not registered or has changed is
+    registered. Nothing is changed unless --commit is passed.
+    """
+    from isabl_cli import registration  # pylint: disable=C0415
+
+    rows = registration.get_rows(
+        registration.get_installed_applications(),
+        registration.get_application_records(),
+    )
+
+    if identifiers:
+        rows, missing = registration.find_rows(rows, identifiers)
+
+        if missing:
+            raise click.UsageError(
+                f"No installed application matches: {', '.join(missing)}, "
+                "see `isabl list-apps`."
+            )
+    else:
+        rows = [
+            i
+            for i in rows
+            if i.status in registration.NEEDS_REGISTRATION and i.primary
+        ]
+
+    to_register, skipped = [], []
+
+    for i in rows:
+        if i.status in {"conflict", "invalid"}:
+            skipped.append((i, f"can't register a {i.status} application"))
+        elif not i.primary:
+            skipped.append((i, "not the primary class, register its primary class"))
+        elif i.status == "registered":
+            skipped.append((i, "already registered"))
+        else:
+            to_register.append(i)
+
+    if skipped:
+        click.secho("Skipping:", fg="yellow")
+        for row, reason in skipped:
+            row.details = [reason]
+        _echo_registration_rows([row for row, _ in skipped])
+        click.echo()
+
+    if not to_register:
+        click.echo("Nothing to register.")
+        return
+
+    click.secho("Registering:" if commit else "Would register:", fg="green")
+    _echo_registration_rows(to_register)
+
+    if not commit:
+        click.echo("\nRun again with --commit to register them.")
+        return
+
+    for i in to_register:
+        i.app().register()
+
+    click.secho(f"\nRegistered {len(to_register)} applications.", fg="green")
