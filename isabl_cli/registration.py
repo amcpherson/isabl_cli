@@ -29,7 +29,7 @@ NEEDS_REGISTRATION = {CHANGED, NOT_REGISTERED}
 Installed = namedtuple("Installed", ["app", "import_string", "command_name", "error"])
 
 
-class Row:
+class RegistrationStatus:
 
     """The registration status of an installed application or a database object."""
 
@@ -138,7 +138,7 @@ def get_rows(installed, records, show_all=False):
         show_all (bool): also return database objects with no installed class.
 
     Returns:
-        list: of Row.
+        list: of RegistrationStatus.
     """
     rows, primaries, merge_keys = [], defaultdict(list), set()
 
@@ -148,7 +148,8 @@ def get_rows(installed, records, show_all=False):
 
     for i in installed:
         if i.app is None:
-            rows.append(Row(INVALID, i, details=[f"failed to import: {i.error}"]))
+            details = [f"failed to import: {i.error}"]
+            rows.append(RegistrationStatus(INVALID, i, details=details))
             continue
 
         key = app_key(i.app)
@@ -157,7 +158,8 @@ def get_rows(installed, records, show_all=False):
             instance = i.app()
             merges = _get_merges(instance)
         except Exception as error:  # pylint: disable=W0703
-            rows.append(Row(INVALID, i, key=key, details=[f"invalid: {error!r}"]))
+            details = [f"invalid: {error!r}"]
+            rows.append(RegistrationStatus(INVALID, i, key=key, details=details))
             continue
 
         merge_keys.update(app_key(i.app, name) for name, _ in merges)
@@ -166,29 +168,30 @@ def get_rows(installed, records, show_all=False):
         if i.app.application_primary and len(primaries[key]) > 1:
             others = [j.import_string for j in primaries[key] if j is not i]
             details = [f"also the primary class: {', '.join(others)}"]
-            rows.append(Row(CONFLICT, i, record, key, details))
+            rows.append(RegistrationStatus(CONFLICT, i, record, key, details))
         elif record is None:
             details = (
                 []
                 if i.app.application_primary
                 else ["registered by its primary class"]
             )
-            rows.append(Row(NOT_REGISTERED, i, None, key, details))
+            rows.append(RegistrationStatus(NOT_REGISTERED, i, None, key, details))
         elif i.app.application_primary:
             details = compare(instance, record, records)
-            rows.append(Row(CHANGED if details else REGISTERED, i, record, key, details))
+            status = CHANGED if details else REGISTERED
+            rows.append(RegistrationStatus(status, i, record, key, details))
         else:
             details = _diff_results(instance._application_results, record.results)
             status = CHANGED if details else SHARED
             details.insert(0, f"uses {record.application_class}")
-            rows.append(Row(status, i, record, key, details))
+            rows.append(RegistrationStatus(status, i, record, key, details))
 
     if show_all:
         installed_keys = {i.key for i in rows if i.key}
 
         for key, record in sorted(records.items(), key=lambda i: str(i[0])):
             if key not in installed_keys and key not in merge_keys:
-                rows.append(Row(NOT_INSTALLED, record=record, key=key))
+                rows.append(RegistrationStatus(NOT_INSTALLED, record=record, key=key))
 
     return rows
 
