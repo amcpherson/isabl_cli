@@ -637,10 +637,7 @@ class AbstractApplication:  # pylint: disable=too-many-public-methods
             assembly=assembly,
         )
 
-        extra = {}
-        if (application.settings or {}).get("default_client") is None:
-            extra["settings"] = {**(application.settings or {}), "default_client": {}}
-
+        # settings are not written here, see `patch_application_settings`
         application = api.patch_instance(
             "applications",
             application.pk,
@@ -648,7 +645,6 @@ class AbstractApplication:  # pylint: disable=too-many-public-methods
             application_class=application_class,
             results=self._application_results,
             url=self.application_url,
-            **extra,
         )
 
         merges = []

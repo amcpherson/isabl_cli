@@ -207,7 +207,7 @@ def test_register_and_running_doesnt_change_it():
         "command_log",
         "command_script",
     }
-    assert application.settings["default_client"] == {}
+    assert application.settings == {}  # register never writes settings
 
     merge = app.project_level_auto_merge_application
     assert merge.application_class == Primary.get_application_class_path()
@@ -223,8 +223,12 @@ def test_register_and_running_doesnt_change_it():
     # steps use the application of the primary class
     assert Step().application.pk == application.pk
 
-    # registering again updates it
-    assert Primary().register().description == Primary.application_description
+    # registering again updates it, and keeps the settings
+    settings = {"7": {"reference": "/a/path"}}
+    api.patch_instance("applications", application.pk, settings=settings)
+    application = Primary().register()
+    assert application.description == Primary.application_description
+    assert application.settings == settings
 
 
 def test_register_step_fails():
