@@ -491,11 +491,11 @@ _STATUS_COLORS = {
 }
 
 
-def _echo_registration_rows(rows):
-    """Print registration rows as aligned columns, details on following lines."""
+def _echo_registration_statuses(app_statuses):
+    """Print registration statuses as aligned columns, details on following lines."""
     cols = ["STATUS", "ASSEMBLY", "COMMAND", "CLASS"]
     table = [cols] + [
-        [i.status, i.assembly, i.command_name, i.import_string] for i in rows
+        [i.status, i.assembly, i.command_name, i.import_string] for i in app_statuses
     ]
     widths = [max(len(str(row[j])) for row in table) for j in range(len(cols))]
 
@@ -507,9 +507,9 @@ def _echo_registration_rows(rows):
 
     click.echo(_line(cols))
 
-    for row, values in zip(rows, table[1:]):
-        click.echo(_line(values, row.status))
-        for detail in row.details:
+    for app_status, values in zip(app_statuses, table[1:]):
+        click.echo(_line(values, app_status.status))
+        for detail in app_status.details:
             click.echo(" " * (widths[0] + 2) + f"- {detail}")
 
 
@@ -552,16 +552,16 @@ def list_apps(statuses, show_all):
     """
     from isabl_cli import registration  # pylint: disable=C0415
 
-    rows = registration.get_rows(
+    app_statuses = registration.get_statuses(
         registration.get_installed_applications(),
         registration.get_application_records(),
         show_all=show_all or "not installed" in statuses,
     )
 
     if statuses:
-        rows = [i for i in rows if i.status in statuses]
+        app_statuses = [i for i in app_statuses if i.status in statuses]
 
-    _echo_registration_rows(rows)
+    _echo_registration_statuses(app_statuses)
 
 
 @click.command(name="register-apps")
@@ -584,13 +584,13 @@ def register_apps(identifiers, commit):
     """
     from isabl_cli import registration  # pylint: disable=C0415
 
-    rows = registration.get_rows(
+    app_statuses = registration.get_statuses(
         registration.get_installed_applications(),
         registration.get_application_records(),
     )
 
     if identifiers:
-        rows, missing = registration.find_rows(rows, identifiers)
+        app_statuses, missing = registration.find_statuses(app_statuses, identifiers)
 
         if missing:
             raise click.UsageError(
@@ -598,15 +598,15 @@ def register_apps(identifiers, commit):
                 "see `isabl list-apps`."
             )
     else:
-        rows = [
+        app_statuses = [
             i
-            for i in rows
+            for i in app_statuses
             if i.status in registration.NEEDS_REGISTRATION and i.primary
         ]
 
     to_register, skipped = [], []
 
-    for i in rows:
+    for i in app_statuses:
         if i.status in {"conflict", "invalid"}:
             skipped.append((i, f"can't register a {i.status} application"))
         elif not i.primary:
@@ -618,9 +618,9 @@ def register_apps(identifiers, commit):
 
     if skipped:
         click.secho("Skipping:", fg="yellow")
-        for row, reason in skipped:
-            row.details = [reason]
-        _echo_registration_rows([row for row, _ in skipped])
+        for app_status, reason in skipped:
+            app_status.details = [reason]
+        _echo_registration_statuses([app_status for app_status, _ in skipped])
         click.echo()
 
     if not to_register:
@@ -628,7 +628,7 @@ def register_apps(identifiers, commit):
         return
 
     click.secho("Registering:" if commit else "Would register:", fg="green")
-    _echo_registration_rows(to_register)
+    _echo_registration_statuses(to_register)
 
     if not commit:
         click.echo("\nRun again with --commit to register them.")

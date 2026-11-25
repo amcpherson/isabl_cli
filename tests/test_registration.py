@@ -100,29 +100,29 @@ def merge_record(app):
     )
 
 
-def statuses(rows):
-    return {i.import_string.rsplit(".", 1)[-1]: (i.status, i.details) for i in rows}
+def by_class(statuses):
+    return {i.import_string.rsplit(".", 1)[-1]: (i.status, i.details) for i in statuses}
 
 
-def test_rows_registered_and_shared():
+def test_statuses_registered_and_shared():
     records = records_of(record(Primary), merge_record(Primary))
-    rows = registration.get_rows(installed(Primary, Step), records)
-    assert statuses(rows) == {
+    statuses = registration.get_statuses(installed(Primary, Step), records)
+    assert by_class(statuses) == {
         "Primary": ("registered", []),
         "Step": ("shared", [f"uses {Primary.get_application_class_path()}"]),
     }
 
 
-def test_rows_not_registered():
-    rows = registration.get_rows(installed(Primary, Step, Unregistered), {})
-    assert statuses(rows) == {
+def test_statuses_not_registered():
+    statuses = registration.get_statuses(installed(Primary, Step, Unregistered), {})
+    assert by_class(statuses) == {
         "Primary": ("not registered", []),
         "Step": ("not registered", ["registered by its primary class"]),
         "Unregistered": ("not registered", []),
     }
 
 
-def test_rows_changed():
+def test_statuses_changed():
     stored = record(
         Primary,
         application_class=Step.get_application_class_path(),
@@ -132,8 +132,8 @@ def test_rows_changed():
             "old": {},
         },
     )
-    rows = registration.get_rows(installed(Primary), records_of(stored))
-    status, details = statuses(rows)["Primary"]
+    statuses = registration.get_statuses(installed(Primary), records_of(stored))
+    status, details = by_class(statuses)["Primary"]
     assert status == "changed"
     assert details == [
         f"application class is {Step.get_application_class_path()}",
@@ -145,43 +145,43 @@ def test_rows_changed():
     ]
 
 
-def test_rows_class_path_compared_by_import():
+def test_statuses_class_path_compared_by_import():
     # a different import string of the same class is not a change
     stored = record(Primary, application_class="tests.test_registration.Primary")
     records = records_of(stored, merge_record(Primary))
-    assert statuses(registration.get_rows(installed(Primary), records)) == {
+    assert by_class(registration.get_statuses(installed(Primary), records)) == {
         "Primary": ("registered", [])
     }
 
     stored = record(Primary, application_class="tests.nowhere.Primary")
     records = records_of(stored, merge_record(Primary))
-    status, details = statuses(registration.get_rows(installed(Primary), records))[
+    status, details = by_class(registration.get_statuses(installed(Primary), records))[
         "Primary"
     ]
     assert status == "changed"
     assert details == ["application class tests.nowhere.Primary can't be imported"]
 
 
-def test_rows_conflict_invalid_and_not_installed():
+def test_statuses_conflict_invalid_and_not_installed():
     broken = registration.Installed(None, "nowhere.Broken", "broken-1.0", "boom")
     other = record(Unregistered)
-    rows = registration.get_rows(
+    statuses = registration.get_statuses(
         installed(Primary, OtherPrimary) + [broken],
         records_of(record(Primary), merge_record(Primary), other),
         show_all=True,
     )
-    by_status = {(i.status, i.command_name) for i in rows}
+    by_status = {(i.status, i.command_name) for i in statuses}
     assert ("conflict", Primary().get_cli_command_name()) in by_status
     assert ("invalid", "broken-1.0") in by_status
     assert ("not installed", Unregistered.NAME) in by_status
     # the merge application of an installed app is not listed as not installed
-    assert all(i.status != "not installed" or i.key[0] == other.name for i in rows)
+    assert all(i.status != "not installed" or i.key[0] == other.name for i in statuses)
 
 
-def test_find_rows():
-    rows = registration.get_rows(installed(Primary, Step), {})
+def test_find_statuses():
+    statuses = registration.get_statuses(installed(Primary, Step), {})
     command = Step().get_cli_command_name()
-    found, missing = registration.find_rows(rows, [command, "Primary", "nope"])
+    found, missing = registration.find_statuses(statuses, [command, "Primary", "nope"])
     assert [i.app for i in found] == [Step, Primary]
     assert missing == ["nope"]
 

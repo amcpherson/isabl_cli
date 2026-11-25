@@ -128,7 +128,7 @@ def app_key(app, name=None):
     return (name or app.NAME, app.VERSION, app.ASSEMBLY or None)
 
 
-def get_rows(installed, records, show_all=False):
+def get_statuses(installed, records, show_all=False):
     """
     Return the registration status of each installed application.
 
@@ -140,7 +140,7 @@ def get_rows(installed, records, show_all=False):
     Returns:
         list: of RegistrationStatus.
     """
-    rows, primaries, merge_keys = [], defaultdict(list), set()
+    statuses, primaries, merge_keys = [], defaultdict(list), set()
 
     for i in installed:
         if i.app is not None and i.app.application_primary:
@@ -149,7 +149,7 @@ def get_rows(installed, records, show_all=False):
     for i in installed:
         if i.app is None:
             details = [f"failed to import: {i.error}"]
-            rows.append(RegistrationStatus(INVALID, i, details=details))
+            statuses.append(RegistrationStatus(INVALID, i, details=details))
             continue
 
         key = app_key(i.app)
@@ -159,7 +159,7 @@ def get_rows(installed, records, show_all=False):
             merges = _get_merges(instance)
         except Exception as error:  # pylint: disable=W0703
             details = [f"invalid: {error!r}"]
-            rows.append(RegistrationStatus(INVALID, i, key=key, details=details))
+            statuses.append(RegistrationStatus(INVALID, i, key=key, details=details))
             continue
 
         merge_keys.update(app_key(i.app, name) for name, _ in merges)
@@ -168,32 +168,34 @@ def get_rows(installed, records, show_all=False):
         if i.app.application_primary and len(primaries[key]) > 1:
             others = [j.import_string for j in primaries[key] if j is not i]
             details = [f"also the primary class: {', '.join(others)}"]
-            rows.append(RegistrationStatus(CONFLICT, i, record, key, details))
+            statuses.append(RegistrationStatus(CONFLICT, i, record, key, details))
         elif record is None:
             details = (
                 []
                 if i.app.application_primary
                 else ["registered by its primary class"]
             )
-            rows.append(RegistrationStatus(NOT_REGISTERED, i, None, key, details))
+            statuses.append(RegistrationStatus(NOT_REGISTERED, i, None, key, details))
         elif i.app.application_primary:
             details = compare(instance, record, records)
             status = CHANGED if details else REGISTERED
-            rows.append(RegistrationStatus(status, i, record, key, details))
+            statuses.append(RegistrationStatus(status, i, record, key, details))
         else:
             details = _diff_results(instance._application_results, record.results)
             status = CHANGED if details else SHARED
             details.insert(0, f"uses {record.application_class}")
-            rows.append(RegistrationStatus(status, i, record, key, details))
+            statuses.append(RegistrationStatus(status, i, record, key, details))
 
     if show_all:
-        installed_keys = {i.key for i in rows if i.key}
+        installed_keys = {i.key for i in statuses if i.key}
 
         for key, record in sorted(records.items(), key=lambda i: str(i[0])):
             if key not in installed_keys and key not in merge_keys:
-                rows.append(RegistrationStatus(NOT_INSTALLED, record=record, key=key))
+                statuses.append(
+                    RegistrationStatus(NOT_INSTALLED, record=record, key=key)
+                )
 
-    return rows
+    return statuses
 
 
 def compare(app, record, records):
@@ -302,21 +304,21 @@ def _diff_results(expected, stored):
     return details
 
 
-def find_rows(rows, identifiers):
+def find_statuses(statuses, identifiers):
     """
-    Return the rows of installed applications matching any of the identifiers.
+    Return the statuses of installed applications matching any identifier.
 
     Identifiers are command names, import strings or class names.
 
     Returns:
-        tuple: matching rows and identifiers that matched nothing.
+        tuple: matching statuses and identifiers that matched nothing.
     """
     matched, missing = [], []
 
     for identifier in identifiers:
         found = [
             i
-            for i in rows
+            for i in statuses
             if i.installed
             and identifier
             in {
